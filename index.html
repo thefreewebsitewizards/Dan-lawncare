@@ -599,12 +599,15 @@
 </div>
 <div class="space-y-2">
 <label class="text-sm font-medium text-gray-300">Service Needed</label>
-<select class="w-full h-12 rounded-lg bg-white/10 border-transparent focus:border-primary focus:bg-white/20 focus:ring-0 text-white px-4 transition-colors [&amp;&gt;option]:text-secondary" name="service" required="">
+<div class="relative">
+<select class="w-full h-12 rounded-lg bg-white/10 border border-white/20 hover:border-primary/50 focus:border-primary focus:bg-white/20 focus:ring-0 text-white pl-4 pr-12 transition-colors appearance-none [&amp;&gt;option]:text-secondary [&amp;&gt;option]:bg-white" name="service" required="">
 <option>Lawn Mowing</option>
 <option>Fertilization</option>
 <option>Yard Clean-up</option>
 <option>Other</option>
 </select>
+<span class="material-symbols-outlined pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-primary">expand_more</span>
+</div>
 </div>
 <button class="w-full h-12 bg-primary hover:bg-primary-hover text-forest font-bold rounded-lg mt-2 transition-all shadow-lg hover:shadow-primary/50" type="submit">
                             Submit Request
@@ -673,6 +676,7 @@
 </div>
 </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script id="prototype-app">
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -851,6 +855,13 @@
     input.classList.toggle('ring-red-400', isInvalid);
   };
 
+  const emailjsConfig = {
+    publicKey: 'xmrujTts7i3oy5vSn',
+    serviceId: 'service_9ilqorj',
+    contactTemplateId: 'template_n61g6rq',
+    confirmationTemplateId: 'template_48qnk8o'
+  };
+
   const mapServiceToFooterOption = (service) => {
     const raw = String(service ?? '').trim();
     if (!raw) return 'Other';
@@ -929,6 +940,32 @@
     return true;
   };
 
+  const openSuccessModal = ({ fullName, email, service }) => {
+    openModal({
+      title: 'Request received',
+      body: `
+        <div class="space-y-5 text-sm text-gray-700 leading-relaxed">
+          <div class="flex items-center gap-4">
+            <div class="size-12 rounded-full bg-primary/20 flex items-center justify-center text-forest">
+              <span class="material-symbols-outlined text-[26px]">check_circle</span>
+            </div>
+            <div>
+              <div class="text-lg font-extrabold text-secondary">Thanks${fullName ? `, ${fullName}` : ''}!</div>
+              <div class="text-gray-500">Your request is on its way to our team.</div>
+            </div>
+          </div>
+          <div class="rounded-xl border border-[#edf4e7] bg-background-light p-4 space-y-2">
+            <div class="font-bold text-secondary">Details</div>
+            <div><span class="font-semibold text-secondary">Service:</span> ${service || 'General Request'}</div>
+            <div><span class="font-semibold text-secondary">Confirmation:</span> ${email || 'Provided email'}</div>
+          </div>
+          <div class="text-gray-500">We’ll follow up shortly with next steps and availability.</div>
+        </div>
+      `,
+      footer: `<button type="button" class="h-12 px-6 rounded-lg bg-primary hover:bg-primary-hover text-forest font-bold transition-colors" data-action="close-modal">Close</button>`
+    });
+  };
+
   const enhanceQuoteForm = () => {
     const form = $('#quote-form');
     if (!form) return;
@@ -968,32 +1005,43 @@
       }
 
       setSubmitting(true);
-      await sleep(900);
-      const emailValue = String(email.value).trim().toLowerCase();
-      const shouldFail = emailValue.includes('fail') || emailValue.includes('error') || Math.random() < 0.1;
-      if (shouldFail) {
+      await sleep(300);
+      if (!window.emailjs) {
         setSubmitting(false);
-        toast({ variant: 'error', title: 'Request not sent', message: 'Please try again in a moment.' });
+        toast({ variant: 'error', title: 'Email service unavailable', message: 'EmailJS did not load. Please refresh and try again.' });
         return;
       }
 
-      try {
-        const lead = {
-          type: 'quote',
-          firstName: String(firstName.value).trim(),
-          lastName: String(lastName.value).trim(),
-          email: String(email.value).trim(),
-          service: String(service.value).trim(),
-          createdAt: new Date().toISOString()
-        };
-        const existing = JSON.parse(localStorage.getItem('demo_leads') || '[]');
-        existing.unshift(lead);
-        localStorage.setItem('demo_leads', JSON.stringify(existing.slice(0, 25)));
-      } catch {}
+      const first = String(firstName.value).trim();
+      const last = String(lastName.value).trim();
+      const emailValue = String(email.value).trim();
+      const serviceValue = String(service.value).trim();
+      const fullName = `${first} ${last}`.trim();
+      const templateParams = {
+        firstName: first,
+        lastName: last,
+        fullName,
+        first_name: first,
+        last_name: last,
+        full_name: fullName,
+        email: emailValue,
+        reply_to: emailValue,
+        to_email: emailValue,
+        service: serviceValue
+      };
 
-      setSubmitting(false);
-      form.reset();
-      toast({ title: 'Request submitted', message: 'We’ll follow up with a quote shortly (demo).' });
+      try {
+        await Promise.all([
+          window.emailjs.send(emailjsConfig.serviceId, emailjsConfig.contactTemplateId, templateParams),
+          window.emailjs.send(emailjsConfig.serviceId, emailjsConfig.confirmationTemplateId, templateParams)
+        ]);
+        setSubmitting(false);
+        form.reset();
+        openSuccessModal({ fullName, email: emailValue, service: serviceValue });
+      } catch (err) {
+        setSubmitting(false);
+        toast({ variant: 'error', title: 'Request not sent', message: 'Please try again in a moment.' });
+      }
     });
   };
 
@@ -1165,6 +1213,7 @@
   };
 
   const init = () => {
+    if (window.emailjs) window.emailjs.init({ publicKey: emailjsConfig.publicKey });
     wireGlobalActions();
     wirePlaceholderLinks();
     enhanceQuoteForm();
